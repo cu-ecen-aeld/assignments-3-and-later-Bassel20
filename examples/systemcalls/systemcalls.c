@@ -1,4 +1,9 @@
 #include "systemcalls.h"
+#include <stdlib.h>
+
+#include <unistd.h>    // for fork and exec
+#include <sys/wait.h> // for wait
+#include <fcntl.h>   // for open
 
 /**
  * @param cmd the command to execute with system()
@@ -9,15 +14,9 @@
 */
 bool do_system(const char *cmd)
 {
-
-/*
- * TODO  add your code here
- *  Call the system() function with the command set in the cmd
- *   and return a boolean true if the system() call completed with success
- *   or false() if it returned a failure
-*/
-
-    return true;
+    int status = system(cmd);
+    if(status != -1) return true;
+    else return false;
 }
 
 /**
@@ -49,18 +48,43 @@ bool do_exec(int count, ...)
     // and may be removed
     command[count] = command[count];
 
-/*
- * TODO:
- *   Execute a system command by calling fork, execv(),
- *   and wait instead of system (see LSP page 161).
- *   Use the command[0] as the full path to the command to execute
- *   (first argument to execv), and use the remaining arguments
- *   as second argument to the execv() command.
- *
-*/
+    fflush(stdout);
+    pid_t pid = fork();
+    int status;
+
+    if (pid == 0) // Child process
+    {
+        printf("Child process\n");
+        int out = execv(command[0], command);
+        if(out == -1){
+            perror("execv failed");
+            exit(EXIT_FAILURE);
+        }
+        exit(1);
+    } 
+    else if (pid > 0) // Parent process
+    { 
+        printf ("Parent process pid = %d\n", pid);
+        pid = wait(&status);
+        printf ("wait_pid = %d\n", pid);
+
+        if (WIFEXITED (status)) printf ("Normal termination with exit status=%d\n", WEXITSTATUS (status));
+        if (WIFSIGNALED (status)) printf ("Killed by signal=%d%s\n", WTERMSIG (status), WCOREDUMP (status) ? " (dumped core)" : "");
+        if (WIFSTOPPED (status)) printf ("Stopped by signal=%d\n", WSTOPSIG (status));
+        if (WIFCONTINUED (status)) printf ("Continued\n");
+
+        if (pid == -1 || WEXITSTATUS(status) != 0) {
+            perror ("wait");
+            return false;
+        }
+    } 
+    else // Error in fork()  
+    {
+        perror("fork failed");
+        return false;
+    }
 
     va_end(args);
-
     return true;
 }
 
@@ -84,16 +108,33 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
     // and may be removed
     command[count] = command[count];
 
+    int kidpid;
+    int status;
+    int fd = open(outputfile, O_WRONLY|O_TRUNC|O_CREAT, 0644);
+    if (fd < 0) { perror("open"); abort(); }
 
-/*
- * TODO
- *   Call execv, but first using https://stackoverflow.com/a/13784315/1446624 as a refernce,
- *   redirect standard out to a file specified by outputfile.
- *   The rest of the behaviour is same as do_exec()
- *
-*/
+    switch (kidpid = fork()) {
+      case -1: perror("fork"); abort();
+      case 0:
+        if (dup2(fd, 1) < 0) { perror("dup2"); abort(); }
+        close(fd);
+        execvp(command[0], command); perror("execvp"); abort();
+      default:
+        /* do whatever the parent wants to do. */
+        printf("Parent process\n");
+        wait(NULL);
+        kidpid = wait(&status);
 
+        if (kidpid == -1) perror ("wait");
+
+        printf ("pid = %d\n", kidpid);
+
+        if (WIFEXITED (status)) printf ("Normal termination with exit status=%d\n", WEXITSTATUS (status));
+        if (WIFSIGNALED (status)) printf ("Killed by signal=%d%s\n", WTERMSIG (status), WCOREDUMP (status) ? " (dumped core)" : "");
+        if (WIFSTOPPED (status)) printf ("Stopped by signal=%d\n", WSTOPSIG (status));
+        if (WIFCONTINUED (status)) printf ("Continued\n");
+        close(fd);
+}
     va_end(args);
-
     return true;
 }
